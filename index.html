@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pawns vs Knight: Smart Strategy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --board-size: min(90vw, 60vh);
+        }
+        
+        body {
+            background: radial-gradient(circle at center, #1e293b, #020617);
+            touch-action: manipulation;
+        }
+
+        .game-board {
+            width: var(--board-size);
+            height: var(--board-size);
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            border: 6px solid #334155;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .square {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .square.dark { background-color: #334155; }
+        .square.light { background-color: #64748b; }
+        
+        .selected { background-color: #4f46e5 !important; }
+        .valid-move::after {
+            content: '';
+            width: 25%;
+            height: 25%;
+            background-color: rgba(34, 197, 94, 0.7);
+            border-radius: 50%;
+            position: absolute;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        .piece { 
+            width: 80%;
+            height: 80%;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: calc(var(--board-size) / 13);
+            z-index: 10;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 6px 0 rgba(0,0,0,0.4);
+        }
+        
+        .piece.pawn { 
+            background: linear-gradient(135deg, #ffffff, #94a3b8);
+        }
+        .piece.knight { 
+            background: linear-gradient(135deg, #1e293b, #000000);
+            color: #818cf8;
+            border: 1px solid #312e81;
+        }
+
+        @keyframes winPulse { 
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .victory-active { animation: winPulse 1s infinite ease-in-out; }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen flex flex-col items-center justify-center font-sans py-4">
+
+    <!-- Header & Dynamic Status -->
+    <header class="text-center mb-6 w-full px-4">
+        <h1 class="text-3xl md:text-5xl font-black tracking-tighter text-indigo-400 drop-shadow-lg mb-2">
+            WOLF & SHEEP
+        </h1>
+        <div id="status" class="text-base md:text-xl font-bold uppercase tracking-widest text-emerald-400 h-8 transition-all duration-300">
+            White to Start
+        </div>
+    </header>
+
+    <!-- The Board -->
+    <div id="board" class="game-board bg-slate-800"></div>
+
+    <!-- Interface -->
+    <div class="mt-8 w-full max-w-lg px-4">
+        <div class="bg-slate-900/90 backdrop-blur-md p-5 rounded-2xl border border-slate-700 shadow-2xl">
+            
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-6">
+                <!-- Difficulty -->
+                <div class="flex flex-col w-full sm:w-1/3">
+                    <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Difficulty</span>
+                    <select id="difficulty" onchange="resetGame()" class="bg-slate-800 text-indigo-300 text-sm font-bold rounded-lg p-2 outline-none border border-slate-700 focus:ring-2 ring-indigo-500">
+                        <option value="4">Easy</option>
+                        <option value="6" selected>Pro</option>
+                        <option value="9">Master</option>
+                    </select>
+                </div>
+
+                <!-- Side Picker -->
+                <div class="flex flex-col w-full sm:w-1/2 items-center">
+                    <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Pick Your Side</span>
+                    <div class="flex bg-slate-800 rounded-xl p-1 border border-slate-700 w-full">
+                        <button id="btn-pawns" onclick="setSide('pawns')" class="flex-1 px-4 py-2 rounded-lg text-xs font-black transition-all bg-indigo-600 text-white shadow-lg">PAWNS</button>
+                        <button id="btn-knight" onclick="setSide('knight')" class="flex-1 px-4 py-2 rounded-lg text-xs font-black transition-all text-slate-400 hover:text-white">KNIGHT</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex flex-col sm:flex-row gap-4 items-center border-t border-slate-800 pt-5">
+                <button onclick="resetGame()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg">
+                    New Game
+                </button>
+                <p class="text-[10px] text-slate-500 leading-tight">
+                    Goal: Knight must reach your bottom row to win. Pawns must block the Knight until it cannot move.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const PAWN = 'P', KNIGHT = 'K';
+        let board = Array(64).fill(null);
+        let turn = 'pawns', playerSide = 'pawns';
+        let selectedIdx = null, validMoves = [], isGameOver = false;
+
+        function init() {
+            board = Array(64).fill(null);
+            [1, 3, 5, 7].forEach(i => board[i] = PAWN); // Logical Top
+            board[60] = KNIGHT; // Logical Bottom
+
+            turn = 'pawns';
+            isGameOver = false;
+            selectedIdx = null;
+            validMoves = [];
+            
+            updateStatus(turn === playerSide ? "Your Turn" : "AI Thinking...");
+            render();
+            if (playerSide === 'knight') setTimeout(makeAIMove, 500);
+        }
+
+        function setSide(side) {
+            playerSide = side;
+            document.getElementById('btn-pawns').className = side === 'pawns' ? 'flex-1 px-4 py-2 rounded-lg text-xs font-black transition-all bg-indigo-600 text-white shadow-lg' : 'flex-1 px-4 py-2 rounded-lg text-xs font-black transition-all text-slate-400 hover:text-white';
+            document.getElementById('btn-knight').className = side === 'knight' ? 'flex-1 px-4 py-2 rounded-lg text-xs font-black transition-all bg-indigo-600 text-white shadow-lg' : 'flex-1 px-4 py-2 rounded-lg text-xs font-black transition-all text-slate-400 hover:text-white';
+            resetGame();
+        }
+
+        function getMoves(idx, state) {
+            const moves = [];
+            const r = Math.floor(idx / 8), c = idx % 8, piece = state[idx];
+            const dirs = piece === PAWN ? [[1, -1], [1, 1]] : [[1, -1], [1, 1], [-1, -1], [-1, 1]];
+            dirs.forEach(([dr, dc]) => {
+                const nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+                    const nIdx = nr * 8 + nc;
+                    if (!state[nIdx]) moves.push(nIdx);
+                }
+            });
+            return moves;
+        }
+
+        function checkWinner(state) {
+            const kIdx = state.indexOf(KNIGHT);
+            if (kIdx === -1) return 'pawns';
+            if (Math.floor(kIdx / 8) === 0) return 'knight'; // Knight reaches logical row 0
+            if (getMoves(kIdx, state).length === 0) return 'pawns'; // Knight trapped
+            return null;
+        }
+
+        function evaluate(state) {
+            const win = checkWinner(state);
+            if (win === 'knight') return -10000;
+            if (win === 'pawns') return 10000;
+            const kIdx = state.indexOf(KNIGHT), kr = Math.floor(kIdx / 8);
+            let score = kr * 100;
+            state.forEach((p, i) => {
+                if (p === PAWN) {
+                    const pr = Math.floor(i / 8);
+                    score += (pr <= kr) ? 60 : -300;
+                }
+            });
+            return score;
+        }
+
+        function minimax(state, depth, alpha, beta, isMaximizing) {
+            const winner = checkWinner(state);
+            if (winner || depth === 0) return evaluate(state);
+            if (isMaximizing) {
+                let maxEval = -Infinity;
+                const pIndices = state.map((p, i) => p === PAWN ? i : -1).filter(i => i !== -1);
+                for (let pIdx of pIndices) {
+                    for (let m of getMoves(pIdx, state)) {
+                        const next = [...state]; next[pIdx] = null; next[m] = PAWN;
+                        const ev = minimax(next, depth - 1, alpha, beta, false);
+                        maxEval = Math.max(maxEval, ev);
+                        alpha = Math.max(alpha, ev);
+                        if (beta <= alpha) break;
+                    }
+                }
+                return maxEval;
+            } else {
+                let minEval = Infinity;
+                const kIdx = state.indexOf(KNIGHT);
+                for (let m of getMoves(kIdx, state)) {
+                    const next = [...state]; next[kIdx] = null; next[m] = KNIGHT;
+                    const ev = minimax(next, depth - 1, alpha, beta, true);
+                    minEval = Math.min(minEval, ev);
+                    beta = Math.min(beta, ev);
+                    if (beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        function makeAIMove() {
+            if (isGameOver) return;
+            const depth = parseInt(document.getElementById('difficulty').value);
+            const isPawnTurn = (turn === 'pawns');
+            let bestMove = { from: -1, to: -1 }, bestVal = isPawnTurn ? -Infinity : Infinity;
+
+            if (isPawnTurn) {
+                const pIndices = board.map((p, i) => p === PAWN ? i : -1).filter(i => i !== -1);
+                for (let pIdx of pIndices) {
+                    for (let m of getMoves(pIdx, board)) {
+                        const next = [...board]; next[pIdx] = null; next[m] = PAWN;
+                        const val = minimax(next, depth, -Infinity, Infinity, false);
+                        if (val > bestVal) { bestVal = val; bestMove = { from: pIdx, to: m }; }
+                    }
+                }
+            } else {
+                const kIdx = board.indexOf(KNIGHT);
+                for (let m of getMoves(kIdx, board)) {
+                    const next = [...board]; next[kIdx] = null; next[m] = KNIGHT;
+                    const val = minimax(next, depth, -Infinity, Infinity, true);
+                    if (val < bestVal) { bestVal = val; bestMove = { from: kIdx, to: m }; }
+                }
+            }
+            if (bestMove.from !== -1) executeMove(bestMove.from, bestMove.to);
+        }
+
+        function executeMove(from, to) {
+            board[to] = board[from]; board[from] = null;
+            selectedIdx = null; validMoves = [];
+            
+            const winner = checkWinner(board);
+            if (winner) {
+                isGameOver = true;
+                render();
+                const userWon = winner === playerSide;
+                const msg = userWon ? `Victory! ${winner.toUpperCase()} Wins` : `Defeat! ${winner.toUpperCase()} Wins`;
+                updateStatus(msg, true, userWon);
+                return;
+            }
+
+            turn = turn === 'pawns' ? 'knight' : 'pawns';
+            updateStatus(turn === playerSide ? "Your Turn" : "AI Thinking...");
+            render();
+            if (turn !== playerSide) setTimeout(makeAIMove, 50);
+        }
+
+        function handleSquareClick(logicalIdx) {
+            if (isGameOver || turn !== playerSide) return;
+            if (validMoves.includes(logicalIdx)) { executeMove(selectedIdx, logicalIdx); return; }
+            const piece = board[logicalIdx];
+            if (piece && ((turn === 'pawns' && piece === PAWN) || (turn === 'knight' && piece === KNIGHT))) {
+                selectedIdx = logicalIdx; validMoves = getMoves(logicalIdx, board); render();
+            }
+        }
+
+        function updateStatus(msg, finish = false, userWon = false) {
+            const el = document.getElementById('status');
+            el.innerText = msg;
+            if (finish) {
+                el.className = `text-lg md:text-2xl font-black uppercase tracking-tighter h-8 victory-active ${userWon ? 'text-emerald-400' : 'text-rose-500'}`;
+            } else {
+                el.className = 'text-base md:text-xl font-bold uppercase tracking-widest text-indigo-300 h-8';
+            }
+        }
+
+        function render() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            for (let visualIdx = 0; visualIdx < 64; visualIdx++) {
+                // If player is Pawns: Logical 63 (bottom) is Visual 63.
+                // If player is Knight: Logical 0 (Knight goal) is at Visual 63.
+                const logicalIdx = playerSide === 'pawns' ? 63 - visualIdx : visualIdx;
+                const lr = Math.floor(logicalIdx / 8), lc = logicalIdx % 8;
+                
+                const sq = document.createElement('div');
+                sq.className = `square ${(lr + lc) % 2 === 0 ? 'light' : 'dark'}`;
+                if (logicalIdx === selectedIdx) sq.classList.add('selected');
+                if (validMoves.includes(logicalIdx)) sq.classList.add('valid-move');
+                
+                const p = board[logicalIdx];
+                if (p) {
+                    const pEl = document.createElement('div');
+                    pEl.className = `piece ${p === PAWN ? 'pawn' : 'knight'}`;
+                    pEl.innerHTML = p === PAWN ? '' : '♞';
+                    sq.appendChild(pEl);
+                }
+                sq.onclick = () => handleSquareClick(logicalIdx);
+                boardEl.appendChild(sq);
+            }
+        }
+
+        function resetGame() { init(); }
+        init();
+    </script>
+</body>
+</html>
